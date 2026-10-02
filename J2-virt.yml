@@ -1,1 +1,151 @@
+---
+- name: create VMs on VMware vSphere
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [vm-create]
+  vars:
+    vm_count: 1                  
+    vm_datacenter: DC3
+    vm_cluster: PCA
+    vm_datastore: datastore3
+    vm_template: rhel9-template
+    vm_network: "VM Network"
+    vm_power_on: true
+    vm_wait_for_ip: true      
+    vm_folder: "/{{ vm_datacenter }}/vm"
+    limit_max_cpu: 16
+    limit_max_ram_gb: 64
+    limit_max_disk_gb: 500
+    limit_max_count: 5
 
+    vm_target_name: "{{ vm_name if (vm_count | int) == 1 else vm_name ~ '-' ~ ('%02d' | format(item | int)) }}"
+  tasks:
+    - name: Validate the survey answers
+      ansible.builtin.assert:
+        that:
+          - vm_name is defined
+          - vm_name is match('^[A-Za-z0-9][A-Za-z0-9-]{1,40}$')
+          - vm_cpu is defined
+          - (vm_cpu | int) >= 1
+          - (vm_cpu | int) <= (limit_max_cpu | int)
+          - vm_ram_gb is defined
+          - (vm_ram_gb | int) >= 1
+          - (vm_ram_gb | int) <= (limit_max_ram_gb | int)
+          - vm_disk_gb is defined
+          - (vm_disk_gb | int) >= 1
+          - (vm_disk_gb | int) <= (limit_max_disk_gb | int)
+          - (vm_count | int) >= 1
+          - (vm_count | int) <= (limit_max_count | int)
+        fail_msg: >-
+          Invalid or missing survey answers. Name: letters, digits and dashes only (2-41 chars).
+          Limits: {{ limit_max_cpu }} vCPU, {{ limit_max_ram_gb }} GB RAM,
+          {{ limit_max_disk_gb }} GB disk, {{ limit_max_count }} VMs per run.
+        quiet: true
+
+    - name: Check that none of the VMs already exists
+      community.vmware.vmware_guest_info:
+        datacenter: "{{ vm_datacenter }}"
+        folder: "{{ vm_folder }}"
+        name: "{{ vm_target_name }}"
+      register: vm_exists
+      ignore_errors: true    
+      loop: "{{ range(1, (vm_count | int) + 1) | list }}"
+      loop_control:
+        label: "{{ vm_target_name }}"
+
+    - name: Stop if a VM with the same name already exists
+      ansible.builtin.assert:
+        that: (vm_exists.results | rejectattr('failed') | list | length) == 0
+        fail_msg: "At least one VM with this name already exists in {{ vm_folder }}. Choose another name."
+        quiet: true
+
+    - name: Create VM from template
+      community.vmware.vmware_guest:
+        datacenter: "{{ vm_datacenter }}"
+        cluster: "{{ vm_cluster }}"
+        folder: "{{ vm_folder }}"
+        name: "{{ vm_target_name }}"
+        template: "{{ vm_template }}"
+        datastore: "{{ vm_datastore }}"
+        state: "{{ 'poweredon' if (vm_power_on | bool) else 'present' }}"
+        hardware:
+          num_cpus: "{{ vm_cpu | int }}"
+          memory_mb: "{{ (vm_ram_gb | int) * 1024 }}"
+        disk:
+          - size_gb: "{{ vm_disk_gb | int }}"
+            datastore: "{{ vm_datastore }}"
+        networks:
+          - name: "{{ vm_network }}"
+        wait_for_ip_address: "{{ (vm_power_on | bool) and (vm_wait_for_ip | bool) }}"
+      loop: "{{ range(1, (vm_count | int) + 1) | list }}"
+      loop_control:
+        label: "{{ vm_target_name }}"
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: >-
+          {{ vm_count }} VM(s) created from {{ vm_template }}:
+          {{ vm_cpu }} vCPU, {{ vm_ram_gb }} GB RAM, {{ vm_disk_gb }} GB disk,
+          network {{ vm_network }}, datastore {{ vm_datastore }}
+
+- name: P2 - Adjust VM resources (CPU / RAM)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [vm-resize]
+  vars:
+    vm_datacenter: DC3
+    vm_folder: "/{{ vm_datacenter }}/vm"
+    allow_poweroff: true    
+    limit_max_cpu: 16
+    limit_max_ram_gb: 64
+  tasks:
+    - name: Validate the survey answers
+      ansible.builtin.assert:
+        that:
+          - vm_name is defined
+          - vm_cpu is defined
+          - (vm_cpu | int) >= 1
+          - (vm_cpu | int) <= (limit_max_cpu | int)
+          - vm_ram_gb is defined
+          - (vm_ram_gb | int) >= 1
+          - (vm_ram_gb | int) <= (limit_max_ram_gb | int)
+        fail_msg: "Invalid or missing survey answers (limits: {{ limit_max_cpu }} vCPU, {{ limit_max_ram_gb }} GB RAM)."
+        quiet: true
+
+    - name: Get current VM state
+      community.vmware.vmware_guest_info:
+        datacenter: "{{ vm_datacenter }}"
+        folder: "{{ vm_folder }}"
+        name: "{{ vm_name }}"
+      register: vm_info
+
+    - name: Remember if the VM was running
+      ansible.builtin.set_fact:
+        vm_was_on: "{{ vm_info.instance.hw_power_status == 'poweredOn' }}"
+
+    - name: Shut down guest
+      community.vmware.vmware_guest_powerstate:
+        folder: "{{ vm_folder }}"
+        name: "{{ vm_name }}"
+        state: shutdown-guest
+        state_change_timeout: 300
+      when: (allow_poweroff | bool) and vm_was_on
+
+    - name: Apply new CPU / RAM
+      community.vmware.vmware_guest:
+        datacenter: "{{ vm_datacenter }}"
+        folder: "{{ vm_folder }}"
+        name: "{{ vm_name }}"
+        hardware:
+          num_cpus: "{{ vm_cpu | int }}"
+          memory_mb: "{{ (vm_ram_gb | int) * 1024 }}"
+        state: present
+
+    - name: Power on again
+      community.vmware.vmware_guest_powerstate:
+        folder: "{{ vm_folder }}"
+        name: "{{ vm_name }}"
+        state: powered-on
+      when: (allow_poweroff | bool) and vm_was_on
