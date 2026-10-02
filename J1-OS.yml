@@ -1,0 +1,225 @@
+---
+- name: Update RHEL automatique
+  hosts: rhel 
+  become: true
+  tags: [rhel-update]
+  tasks:
+    - name: Install dnf-utils
+      ansible.builtin.dnf:
+        name: dnf-utils
+        state: present
+
+    - name: Update all packages
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest
+
+
+- name: update windows automatique
+  hosts: windows
+  gather_facts: true
+  tags: [windows-update]
+  tasks:
+    - name: Install security and critical updates
+      ansible.windows.win_updates:
+        category_names: [SecurityUpdates, CriticalUpdates, UpdateRollups]
+        reboot: true
+        reboot_timeout: 1800
+
+- name: centralized config (SSH, NTP, DNS, sysctl)
+  hosts: rhel
+  become: true
+  gather_facts: false
+  vars:
+    ssh_config_default: &ssh_config_default
+      Port: "22"
+      LogLevel: "INFO"
+      ClientAliveInterval: "300"
+      ClientAliveCountMax: "2"
+      MaxSessions: "10"
+    ssh_verify_effective: true
+    ssh_config_effective: "{{ ssh_config | default(ssh_config_default) }}"
+
+    ntp_servers: []  
+    dns_servers: [10.0.0.10, 10.0.0.11]
+    dns_search: biat.local
+    sysctl_settings: &sysctl_baseline
+      net.ipv4.ip_forward: "0"
+      net.ipv4.conf.all.accept_redirects: "0"
+      net.ipv4.conf.default.accept_redirects: "0"
+      net.ipv4.conf.all.send_redirects: "0"
+      net.ipv4.conf.all.accept_source_route: "0"
+      net.ipv4.icmp_echo_ignore_broadcasts: "1"
+      net.ipv4.tcp_syncookies: "1"
+      kernel.randomize_va_space: "2"
+  tasks:
+    - name: Ensure sshd_config includes the drop-in directory
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^\s*Include\s+/etc/ssh/sshd_config\.d/'
+        line: "Include /etc/ssh/sshd_config.d/*.conf"
+        insertbefore: BOF
+        validate: /usr/sbin/sshd -t -f %s
+      tags: [ssh]
+
+    - name: Deploy SSH configuration drop-in
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/00-ansible.conf
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          {% for key, value in ssh_config_effective.items() %}
+          {{ key }} {{ value }}
+          {% endfor %}
+          {% for line in ssh_extra_lines %}
+          {{ line }}
+          {% endfor %}
+        validate: /usr/sbin/sshd -t -f %s
+      notify: Reload sshd
+      tags: [ssh]
+
+    - name: Install chrony
+      ansible.builtin.dnf:
+        name: chrony
+        state: present
+      tags: [ntp]
+
+    - name: Deploy chrony.conf
+      ansible.builtin.copy:
+        dest: /etc/chrony.conf
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+        content: |
+          {% for server in ntp_servers %}
+          server {{ server }} iburst
+          {% endfor %}
+          driftfile /var/lib/chrony/drift
+          makestep 1.0 3
+          rtcsync
+          logdir /var/log/chrony
+      notify: Restart chronyd
+      tags: [ntp]
+
+    - name: Enable and start chronyd
+      ansible.builtin.service:
+        name: chronyd
+        state: started
+        enabled: true
+      tags: [ntp]
+
+    - name: Gather network facts
+      ansible.builtin.setup:
+        gather_subset: [network]
+      tags: [dns]
+
+    - name: Find the NetworkManager connection of the default interface
+      ansible.builtin.command: "nmcli -g GENERAL.CONNECTION device show {{ ansible_facts['default_ipv4']['interface'] }}"
+      register: nm_con
+      changed_when: false
+      check_mode: false
+      tags: [dns]
+
+    - name: Stop if the interface has no NetworkManager connection
+      ansible.builtin.assert:
+        that: nm_con.stdout | length > 0 and nm_con.stdout != '--'
+        fail_msg: "No active NetworkManager connection on {{ ansible_facts['default_ipv4']['interface'] }}"
+        quiet: true
+      tags: [dns]
+
+    - name: Read DNS settings before
+      ansible.builtin.command: "nmcli -g ipv4.dns,ipv4.dns-search,ipv4.ignore-auto-dns connection show '{{ nm_con.stdout }}'"
+      register: dns_before
+      changed_when: false
+      check_mode: false
+      tags: [dns]
+
+    - name: Set DNS servers and search domain on the connection
+      ansible.builtin.command: >-
+        nmcli connection modify '{{ nm_con.stdout }}'
+        ipv4.dns '{{ dns_servers | join(" ") }}'
+        ipv4.dns-search '{{ dns_search }}'
+        ipv4.ignore-auto-dns yes
+      changed_when: false
+      tags: [dns]
+
+    - name: Read DNS settings after
+      ansible.builtin.command: "nmcli -g ipv4.dns,ipv4.dns-search,ipv4.ignore-auto-dns connection show '{{ nm_con.stdout }}'"
+      register: dns_after
+      changed_when: false
+      check_mode: false
+      tags: [dns]
+
+    - name: Apply to the running interface 
+      ansible.builtin.command: "nmcli device reapply {{ ansible_facts['default_ipv4']['interface'] }}"
+      changed_when: dns_before.stdout != dns_after.stdout
+      when: not ansible_check_mode
+      tags: [dns]
+
+    - name: Apply sysctl settings
+      ansible.posix.sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        sysctl_file: /etc/sysctl.d/99-ansible.conf
+        sysctl_set: true
+        reload: true
+        state: present
+      loop: "{{ (sysctl_settings | combine(sysctl_extra | default({}))) | dict2items }}"
+      tags: [sysctl]
+
+    - name: Apply pending handlers now
+      ansible.builtin.meta: flush_handlers
+      tags: [ssh, ntp]
+
+    - name: Read effective sshd configuration
+      ansible.builtin.command: /usr/sbin/sshd -T
+      register: sshd_effective
+      changed_when: false
+      check_mode: false
+      when: ssh_verify_effective | bool
+      tags: [ssh]
+
+    - name: Assert each configured directive is effective
+      ansible.builtin.assert:
+        that: (item.key | lower ~ ' ' ~ item.value | lower) in effective_lines
+        fail_msg: "{{ item.key }} {{ item.value }} is not effective - another sshd file or Match block may override it"
+        quiet: true
+      vars:
+        effective_lines: "{{ sshd_effective.stdout_lines | map('lower') | list }}"
+      loop: "{{ ssh_config_effective | dict2items }}"
+      when: ssh_verify_effective | bool and not ansible_check_mode
+      tags: [ssh]
+
+  handlers:
+    - name: Reload sshd
+      ansible.builtin.service:
+        name: sshd
+        state: reloaded
+
+    - name: Restart chronyd
+      ansible.builtin.service:
+        name: chronyd
+        state: restarted
+
+- name:  Compliance check (CIS / ISO 27001 )
+  hosts: all
+  become: true
+  tags: [compliance]
+  tasks:
+
+    - name: Stat /etc/shadow
+      ansible.builtin.stat:
+        path: /etc/shadow
+      register: shadow_stat
+
+    - name: Check /etc/shadow permissions
+      ansible.builtin.set_fact:
+        deviations: "{{ deviations + ['/etc/shadow mode is ' ~ shadow_stat.stat.mode] }}"
+      when: shadow_stat.stat.mode not in ['0000', '0640']
+
+    - name: Compliance report
+      ansible.builtin.debug:
+        msg: "{{ 'COMPLIANT' if deviations | length == 0 else deviations }}"
+
