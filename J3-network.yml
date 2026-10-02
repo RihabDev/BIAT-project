@@ -1,0 +1,51 @@
+---
+-name: collect swith config
+ hosts: switches
+ gather_facts: false
+ connection: ansible.netcommen.network_cli
+ vars:
+   ansible_network_os: ??
+   ansible_become: true 
+ tasks: 
+   - name: get config
+       commands: show running_config
+     register: 
+- name store backup 
+  hosts: backup
+  gather_facts: false
+  vars:
+    ??
+  tasks: 
+    -name: create directory
+     ansible.builtin.file: 
+       path: ""
+       state: directory 
+       mode: 0750
+    -name: write config 
+     ansible.builtin.copy:
+       content:
+       dest: "path ?"
+       mode: "0640"
+
+-name: grouped ACL / VLAN / SNMP / banner
+ hosts: switches 
+ gather_facts: false
+ vars: 
+   ansible_become: true
+   os:
+   vlans: 
+     - {vlan_id: ??? , name: ??}
+     - {vlan_id: ??? , name: ??}
+    snmp_acl: ??
+    snmp_manager: ?? ip ??
+  tasks: 
+    -name: config vlans
+     os_vlans: 
+       config: "{{vlans}}
+    -name: config snmp
+    
+
+ 
+  
+  
+    
