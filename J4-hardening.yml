@@ -1,0 +1,62 @@
+---
+- name: Compliance check (CIS / ISO 27001) and alert
+  hosts: rhel
+  become: true
+  tags: [compliance-alert]
+  vars:
+    scap_profile: xccdf_org.ssgproject.content_profile_cis_server_l1
+    smtp_host: smtp.biat.local
+    alert_from: ?
+    alert_to: ?
+  tasks:
+    - name: Install OpenSCAP and the security content
+      ansible.builtin.dnf:
+        name: [openscap-scanner, scap-security-guide]
+        state: present
+
+    - name: Run the OpenSCAP scan
+      ansible.builtin.command: >-
+        oscap xccdf eval
+        --profile {{ scap_profile }}
+        --report /var/tmp/oscap-report.html
+        /usr/share/xml/scap/ssg/content/ssg-rhel{{ ansible_distribution_major_version }}-ds.xml
+      register: oscap
+      changed_when: false
+      failed_when: oscap.rc not in [0, 2]
+      async: 1800
+      poll: 15
+
+    - name: Count the failed rules
+      ansible.builtin.set_fact:
+        failed_count: "{{ oscap.stdout_lines | select('match', '^Result.*fail$') | list | length }}"
+
+    - name: Send alert by email
+      community.general.mail:
+        host: "{{ smtp_host }}"
+        port: 25
+        from: "{{ alert_from }}"
+        to: "{{ alert_to }}"
+        subject: "[COMPLIANCE] {{ failed_count }} rule(s) failed on {{ inventory_hostname }}"
+        body: |
+          {{ failed_count }} OpenSCAP rule(s) failed on {{ inventory_hostname }}.
+          Profile: {{ scap_profile }}
+          Report on the host: /var/tmp/oscap-report.html
+      delegate_to: localhost
+      become: false
+      when: failed_count | int > 0
+
+    - name: Mark the job as failed
+      ansible.builtin.fail:
+        msg: "{{ failed_count }} rule(s) failed on {{ inventory_hostname }}"
+      when: failed_count | int > 0
+
+- name: Automatic remediation of security patches
+  hosts: rhel
+  become: true
+  tags: [remediation]
+  tasks:
+    - name: Apply security patches
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest
+        security: true
