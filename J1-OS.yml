@@ -1,8 +1,44 @@
----
-- name: Update RHEL automatique
-  hosts: rhel 
+- name: P1 - Common settings
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars: &settings
+    rhel_reboot_after_update: false
+    ssh_config_default:
+      Port: "22"
+      LogLevel: "INFO"
+      ClientAliveInterval: "300"
+      ClientAliveCountMax: "2"
+      MaxSessions: "10"
+    ssh_extra_lines: []                 
+    ssh_verify_effective: true         
+    ssh_config_effective: "{{ ssh_config | default(ssh_config_default) }}"
+
+    ntp_servers: []             
+
+    dns_servers: [8.8.8.8]
+    dns_search: biat.local
+    sysctl_settings:
+      net.ipv4.ip_forward: "0"
+      net.ipv4.conf.all.accept_redirects: "0"
+      net.ipv4.conf.default.accept_redirects: "0"
+      net.ipv4.conf.all.send_redirects: "0"
+      net.ipv4.conf.all.accept_source_route: "0"
+      net.ipv4.icmp_echo_ignore_broadcasts: "1"
+      net.ipv4.tcp_syncookies: "1"
+      kernel.randomize_va_space: "2"
+    scap_profile: xccdf_org.ssgproject.content_profile_cis_server_l1
+    scap_content_dir: /usr/share/xml/scap/ssg/content
+    scap_output_dir: /var/tmp/oscap
+    scap_show_failed_max: 30          
+    scap_fail_job_on_failed_rules: false
+
+- name: RHEL automatic update
+  hosts: rhel
   become: true
+  gather_facts: false
   tags: [rhel-update]
+  vars: *settings
   tasks:
     - name: Install dnf-utils
       ansible.builtin.dnf:
@@ -15,43 +51,23 @@
         state: latest
 
 
-- name: update windows automatique
+- name: P1 - Windows Server automatic update
   hosts: windows
-  gather_facts: true
+  gather_facts: false
   tags: [windows-update]
+  vars: *settings
   tasks:
     - name: Install security and critical updates
       ansible.windows.win_updates:
         category_names: [SecurityUpdates, CriticalUpdates, UpdateRollups]
         reboot: true
-        reboot_timeout: 1800
 
-- name: centralized config (SSH, NTP, DNS, sysctl)
+- name: Centralized config (SSH, NTP, DNS, sysctl)
   hosts: rhel
   become: true
   gather_facts: false
-  vars:
-    ssh_config_default: &ssh_config_default
-      Port: "22"
-      LogLevel: "INFO"
-      ClientAliveInterval: "300"
-      ClientAliveCountMax: "2"
-      MaxSessions: "10"
-    ssh_verify_effective: true
-    ssh_config_effective: "{{ ssh_config | default(ssh_config_default) }}"
-
-    ntp_servers: []  
-    dns_servers: [10.0.0.10, 10.0.0.11]
-    dns_search: biat.local
-    sysctl_settings: &sysctl_baseline
-      net.ipv4.ip_forward: "0"
-      net.ipv4.conf.all.accept_redirects: "0"
-      net.ipv4.conf.default.accept_redirects: "0"
-      net.ipv4.conf.all.send_redirects: "0"
-      net.ipv4.conf.all.accept_source_route: "0"
-      net.ipv4.icmp_echo_ignore_broadcasts: "1"
-      net.ipv4.tcp_syncookies: "1"
-      kernel.randomize_va_space: "2"
+  tags: [baseline]
+  vars: *settings
   tasks:
     - name: Ensure sshd_config includes the drop-in directory
       ansible.builtin.lineinfile:
@@ -79,35 +95,42 @@
       notify: Reload sshd
       tags: [ssh]
 
-    - name: Install chrony
-      ansible.builtin.dnf:
-        name: chrony
-        state: present
+    - name: NTP (chrony)
+      when: ntp_servers | length > 0
       tags: [ntp]
+      block:
+        - name: Install chrony
+          ansible.builtin.dnf:
+            name: chrony
+            state: present
 
-    - name: Deploy chrony.conf
-      ansible.builtin.copy:
-        dest: /etc/chrony.conf
-        owner: root
-        group: root
-        mode: "0644"
-        backup: true
-        content: |
-          {% for server in ntp_servers %}
-          server {{ server }} iburst
-          {% endfor %}
-          driftfile /var/lib/chrony/drift
-          makestep 1.0 3
-          rtcsync
-          logdir /var/log/chrony
-      notify: Restart chronyd
-      tags: [ntp]
+        - name: Deploy chrony.conf
+          ansible.builtin.copy:
+            dest: /etc/chrony.conf
+            owner: root
+            group: root
+            mode: "0644"
+            backup: true
+            content: |
+              {% for server in ntp_servers %}
+              server {{ server }} iburst
+              {% endfor %}
+              driftfile /var/lib/chrony/drift
+              makestep 1.0 3
+              rtcsync
+              logdir /var/log/chrony
+          notify: Restart chronyd
 
-    - name: Enable and start chronyd
-      ansible.builtin.service:
-        name: chronyd
-        state: started
-        enabled: true
+        - name: Enable and start chronyd
+          ansible.builtin.service:
+            name: chronyd
+            state: started
+            enabled: true
+
+    - name: Skip NTP because no server is defined
+      ansible.builtin.debug:
+        msg: "ntp_servers is empty, NTP configuration skipped"
+      when: ntp_servers | length == 0
       tags: [ntp]
 
     - name: Gather network facts
@@ -152,7 +175,7 @@
       check_mode: false
       tags: [dns]
 
-    - name: Apply to the running interface 
+    - name: Apply to the running interface
       ansible.builtin.command: "nmcli device reapply {{ ansible_facts['default_ipv4']['interface'] }}"
       changed_when: dns_before.stdout != dns_after.stdout
       when: not ansible_check_mode
@@ -203,23 +226,92 @@
         name: chronyd
         state: restarted
 
-- name:  Compliance check (CIS / ISO 27001 )
-  hosts: all
+- name: Compliance check (CIS / ISO 27001) with OpenSCAP
+  hosts: rhel
   become: true
+  gather_facts: false
   tags: [compliance]
+  vars: *settings
   tasks:
+    - name: Gather minimal facts (OS major version)
+      ansible.builtin.setup:
+        gather_subset: [min]
 
-    - name: Stat /etc/shadow
-      ansible.builtin.stat:
-        path: /etc/shadow
-      register: shadow_stat
+    - name: Install OpenSCAP scanner and SCAP Security Guide content
+      ansible.builtin.dnf:
+        name: [openscap-scanner, scap-security-guide]
+        state: present
 
-    - name: Check /etc/shadow permissions
+    - name: Set the SCAP datastream path
       ansible.builtin.set_fact:
-        deviations: "{{ deviations + ['/etc/shadow mode is ' ~ shadow_stat.stat.mode] }}"
-      when: shadow_stat.stat.mode not in ['0000', '0640']
+        scap_datastream: "{{ scap_content_dir }}/ssg-rhel{{ ansible_facts['distribution_major_version'] }}-ds.xml"
 
-    - name: Compliance report
+    - name: Check that the datastream exists
+      ansible.builtin.stat:
+        path: "{{ scap_datastream }}"
+      register: ds_stat
+
+    - name: Stop if the datastream is missing
+      ansible.builtin.assert:
+        that: ds_stat.stat.exists
+        fail_msg: "{{ scap_datastream }} not found - check the scap-security-guide package for this RHEL version"
+        quiet: true
+
+    - name: List the profiles available in the SCAP content
+      ansible.builtin.command: "oscap info --profiles {{ scap_datastream }}"
+      register: scap_profiles
+      changed_when: false
+      tags: [never, scap-profiles]
+
+    - name: Show available profiles
       ansible.builtin.debug:
-        msg: "{{ 'COMPLIANT' if deviations | length == 0 else deviations }}"
+        var: scap_profiles.stdout_lines
+      tags: [never, scap-profiles]
 
+    - name: Create the output directory
+      ansible.builtin.file:
+        path: "{{ scap_output_dir }}"
+        state: directory
+        mode: "0750"
+
+    - name: Run the OpenSCAP scan
+      ansible.builtin.command: >-
+        oscap xccdf eval
+        --profile {{ scap_profile }}
+        --results {{ scap_output_dir }}/results.xml
+        --report {{ scap_output_dir }}/report.html
+        {{ scap_datastream }}
+      register: oscap
+      changed_when: false
+      failed_when: oscap.rc not in [0, 2]   
+      check_mode: false
+      async: 1800
+      poll: 15
+
+    - name: Count the results
+      ansible.builtin.set_fact:
+        scap_pass: "{{ oscap.stdout_lines | select('match', '^Result.*pass$') | list | length }}"
+        scap_fail: "{{ oscap.stdout_lines | select('match', '^Result.*fail$') | list | length }}"
+
+    - name: List the first failed rules
+      ansible.builtin.shell: |
+        awk '/^Title/{t=$0} /^Result[[:space:]]+fail/{print t}' | head -n {{ scap_show_failed_max }}
+      args:
+        stdin: "{{ oscap.stdout }}"
+      register: failed_titles
+      changed_when: false
+      check_mode: false
+      when: scap_fail | int > 0
+
+    - name: Compliance summary
+      ansible.builtin.debug:
+        msg:
+          - "{{ inventory_hostname }}: {{ scap_pass }} rules passed, {{ scap_fail }} failed"
+          - "Profile: {{ scap_profile | regex_replace('^.*profile_', '') }}"
+          - "Full HTML report on the host: {{ scap_output_dir }}/report.html"
+          - "{{ failed_titles.stdout_lines | default([]) }}"
+
+    - name: Fail the job if rules failed
+      ansible.builtin.fail:
+        msg: "{{ scap_fail }} OpenSCAP rule(s) failed on {{ inventory_hostname }}"
+      when: (scap_fail | int > 0) and (scap_fail_job_on_failed_rules | bool)
