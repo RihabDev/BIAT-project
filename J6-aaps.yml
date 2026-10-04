@@ -1,0 +1,112 @@
+- name: Deploy Nginx
+  hosts: web
+  become: true
+  tags: [nginx]
+  tasks:
+    - name: Install Nginx
+      ansible.builtin.dnf:
+        name: nginx
+        state: present
+
+    - name: Enable and start Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
+- name: Deploy Tomcat
+  hosts: tomcat
+  become: true
+  tags: [tomcat]
+  vars:
+    tomcat_version: "10.1.28"
+    tomcat_home: /opt/tomcat
+    tomcat_url: "https://archive.apache.org/dist/tomcat/tomcat-10/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
+  tasks:
+    - name: Install Java
+      ansible.builtin.dnf:
+        name: java-17-openjdk-headless
+        state: present
+
+    - name: Create tomcat user
+      ansible.builtin.user:
+        name: tomcat
+        shell: /sbin/nologin
+        system: true
+        home: "{{ tomcat_home }}"
+        create_home: false
+
+    - name: Create install directory
+      ansible.builtin.file:
+        path: "{{ tomcat_home }}"
+        state: directory
+        owner: tomcat
+        group: tomcat
+        mode: "0755"
+
+    - name: Download and extract Tomcat
+      ansible.builtin.unarchive:
+        src: "{{ tomcat_url }}"
+        dest: "{{ tomcat_home }}"
+        remote_src: true
+        extra_opts: [--strip-components=1]
+        owner: tomcat
+        group: tomcat
+        creates: "{{ tomcat_home }}/bin/catalina.sh"
+
+    - name: Install systemd unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/tomcat.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Apache Tomcat
+          After=network.target
+
+          [Service]
+          Type=forking
+          User=tomcat
+          Group=tomcat
+          Environment=JAVA_HOME=/usr/lib/jvm/jre-17
+          Environment=CATALINA_HOME={{ tomcat_home }}
+          Environment=CATALINA_PID={{ tomcat_home }}/temp/tomcat.pid
+          PIDFile={{ tomcat_home }}/temp/tomcat.pid
+          ExecStart={{ tomcat_home }}/bin/startup.sh
+          ExecStop={{ tomcat_home }}/bin/shutdown.sh
+          Restart=on-failure
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start Tomcat
+      ansible.builtin.systemd:
+        name: tomcat
+        state: started
+        enabled: true
+        daemon_reload: true
+
+- name: Deploy JBoss EAP
+  hosts: jboss
+  become: true
+  tags: [jboss]
+  tasks:
+    - name: Install JBoss EAP
+      ansible.builtin.dnf:
+        name: "@jboss-eap8-jdk17"
+        state: present
+
+    - name: Enable and start JBoss EAP
+      ansible.builtin.service:
+        name: eap8-standalone
+        state: started
+        enabled: true
+
+- name: Controlled restart (one host at a time)
+  hosts: "{{ target_hosts }}"
+  become: true
+  serial: 1
+  tags: [rolling-restart]
+  tasks:
+    - name: Restart the service
+      ansible.builtin.service:
+        name: "{{ restart_service }}"
+        state: restarted
