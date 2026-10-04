@@ -1,0 +1,78 @@
+---
+- name: deploy Zabbix agent  (RHEL)
+  hosts: "{{ target_hosts | default('rhel') }}"
+  become: true
+  tags: [zabbix-rhel]
+  vars:
+    zabbix_server: zabbix.biat.local
+    zabbix_repo_rpm: "https://repo.zabbix.com/zabbix/7.0/rhel/9/x86_64/zabbix-release-latest-7.0.el9.noarch.rpm"
+  tasks:
+    - name: Install Zabbix repository
+      ansible.builtin.dnf:
+        name: "{{ zabbix_repo_rpm }}"
+        state: present
+        disable_gpg_check: true
+
+    - name: Install Zabbix agent 2
+      ansible.builtin.dnf:
+        name: zabbix-agent2
+        state: present
+
+    - name: Configure Zabbix agent 2
+      ansible.builtin.lineinfile:
+        path: /etc/zabbix/zabbix_agent2.conf
+        regexp: '^#?\s*{{ item.key }}='
+        line: "{{ item.key }}={{ item.value }}"
+      loop:
+        - { key: Server, value: "{{ zabbix_server }}" }
+        - { key: ServerActive, value: "{{ zabbix_server }}" }
+        - { key: Hostname, value: "{{ inventory_hostname }}" }
+      notify: Restart zabbix-agent2
+
+    - name: Open agent port in firewalld
+      ansible.posix.firewalld:
+        port: 10050/tcp
+        permanent: true
+        immediate: true
+        state: enabled
+      failed_when: false
+
+    - name: Enable and start Zabbix agent 2
+      ansible.builtin.service:
+        name: zabbix-agent2
+        state: started
+        enabled: true
+
+    - name: Verify agent is listening
+      ansible.builtin.wait_for:
+        port: 10050
+        timeout: 30
+
+  handlers:
+    - name: Restart zabbix-agent2
+      ansible.builtin.service:
+        name: zabbix-agent2
+        state: restarted
+
+- name: deploy Zabbix agent 2 (Windows)
+  hosts: "{{ target_hosts | default('windows') }}"
+  tags: [zabbix-windows]
+  vars:
+    zabbix_server: zabbix.biat.local
+    zabbix_msi_url: "https://cdn.zabbix.com/zabbix/binaries/stable/7.0/7.0.0/zabbix_agent2-7.0.0-windows-amd64-openssl.msi"
+  tasks:
+    - name: Install Zabbix agent 2
+      ansible.windows.win_package:
+        path: "{{ zabbix_msi_url }}"
+        arguments: "/qn SERVER={{ zabbix_server }} SERVERACTIVE={{ zabbix_server }} HOSTNAME={{ inventory_hostname }}"
+        state: present
+
+    - name: Open firewall port 10050
+      community.windows.win_firewall_rule:
+        name: Zabbix Agent
+        localport: 10050
+        protocol: tcp
+        action: allow
+        direction: in
+        state: present
+        enabled: true
