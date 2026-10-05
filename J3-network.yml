@@ -6,6 +6,7 @@
  vars:
    ansible_network_os: ??
    ansible_become: true 
+   snmp_hosts: [ip snmp host]
  tasks: 
    - name: get config
        commands: show running_config
@@ -43,7 +44,7 @@
      os_vlans: 
        config: "{{vlans}}
     -name: config snmp
-    
+     
 
  
   
