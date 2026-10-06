@@ -11,7 +11,7 @@
    - name: get config
        commands: show running_config
      register: 
-- name store backup 
+- name: store backup 
   hosts: backup
   gather_facts: false
   vars:
