@@ -1,0 +1,11 @@
+---
+- name: Update RHEL
+  hosts: rhel
+  become: true
+  gather_facts: false
+  tags: [rhel-update]
+  tasks:
+    - name: Update all packages
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest
