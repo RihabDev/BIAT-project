@@ -1,11 +1,11 @@
 - name: Déploiement applicatif standardisé
-  hosts: all
+  hosts: local
   become: true
   vars:
     apps:
       - { package: nginx, service: nginx, port: 80 }
-      - { package: jws6-tomcat, service: jws6-tomcat, port: 8080 }
-      - { package: eap8-wildfly, service: eap8-standalone, port: 8081 }
+      #- { package: jws6-tomcat, service: jws6-tomcat, port: 8080 }
+      #- { package: eap8-wildfly, service: eap8-standalone, port: 8081 }
   tasks:
     - name: Installer les applications
       ansible.builtin.dnf:
