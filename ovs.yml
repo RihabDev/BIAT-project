@@ -1,7 +1,7 @@
 
 ---
 - name: Deploy Open vSwitch on RHEL 9
-  hosts: ovs_servers
+  hosts: all
   become: true
   gather_facts: true
 
