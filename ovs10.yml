@@ -33,13 +33,32 @@
         state: present
       when: ansible_facts['distribution_major_version'] == "10"
 
+    - name: Check Open vSwitch database service
+      ansible.builtin.command:
+        cmd: systemctl status ovsdb-server
+      register: ovsdb_status
+      changed_when: false
+      failed_when: false
+
+    - name: Initialize Open vSwitch database when missing
+      ansible.builtin.command:
+        cmd: ovsdb-tool create /etc/openvswitch/conf.db /usr/share/openvswitch/vswitch.ovsschema
+      args:
+        creates: /etc/openvswitch/conf.db
+
+    - name: Enable and start Open vSwitch database
+      ansible.builtin.systemd:
+        name: ovsdb-server
+        enabled: true
+        state: started
+
     - name: Enable and start Open vSwitch
       ansible.builtin.systemd:
         name: openvswitch
         enabled: true
         state: started
 
-    - name: Get Open vSwitch service status
+    - name: Verify Open vSwitch service
       ansible.builtin.command:
         cmd: systemctl is-active openvswitch
       register: ovs_service_status
