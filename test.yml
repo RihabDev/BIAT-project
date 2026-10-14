@@ -2,9 +2,6 @@
   hosts: all
   become: true
   vars:
-    ansible_connection: ssh
-    ansible_host: 192.168.99.129
-    ansible_user: rihab
     apps:
       - { package: nginx, service: nginx, port: 80 }
       - { package: jws6-tomcat, service: jws6-tomcat, port: 8080 }
