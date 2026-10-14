@@ -40,6 +40,7 @@
         src: "/opt/apache-tomcat-{{ tomcat_version }}"
         dest: "{{ tomcat_dir }}"
         state: link
+        force: yes 
 
     - name: Appliquer les droits au dossier Tomcat
       ansible.builtin.file:
