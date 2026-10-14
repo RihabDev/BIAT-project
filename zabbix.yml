@@ -3,8 +3,7 @@
   hosts: all
   become: yes
   vars:
-    # L'adresse IP ou le nom DNS de votre serveur central Zabbix
-    zabbix_server_ip: "192.168.1.100" 
+    zabbix_server_ip: "" 
     zabbix_listen_port: "10050"
 
   tasks:
