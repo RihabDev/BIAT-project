@@ -11,7 +11,6 @@
     snmp_monitor_ip: "192.168.99.129"
 
   tasks:
-    # 1. VLAN: create a VLAN-aware OVS bridge
     - name: Create OVS bridge
       ansible.builtin.command:
         cmd: "ovs-vsctl add-br {{ ovs_bridge }}"
@@ -26,8 +25,7 @@
         cmd: "ovs-vsctl set bridge {{ ovs_bridge }} vlan_mode=trunk"
       changed_when: false
 
-    # 2. ACL: inspect existing OVS flow rules
-    # Actual traffic filtering requires explicit policy rules.
+
     - name: Inspect existing OVS ACL flow rules
       ansible.builtin.command:
         cmd: "ovs-ofctl dump-flows {{ ovs_bridge }}"
@@ -38,7 +36,6 @@
       ansible.builtin.debug:
         var: ovs_flows.stdout_lines
 
-    # 3. SNMP: install and configure the agent
     - name: Install SNMP and firewall management packages
       ansible.builtin.dnf:
         name:
@@ -78,7 +75,6 @@
         enabled: true
         state: started
 
-    # 4. SSH security banner
     - name: Create security banner
       ansible.builtin.copy:
         dest: /etc/issue.net
@@ -99,7 +95,6 @@
         validate: "/usr/sbin/sshd -t -f %s"
       notify: Reload SSH
 
-    # 5. Back up configurations
     - name: Create backup directory
       ansible.builtin.file:
         path: "{{ backup_root }}"
@@ -148,7 +143,6 @@
         hour: "2"
         job: "/usr/local/sbin/backup-network-config.sh"
 
-    # 6. Verify OVS
     - name: Check Open vSwitch service
       ansible.builtin.command:
         cmd: systemctl is-active openvswitch
