@@ -1,0 +1,30 @@
+- name: Déploiement applicatif standardisé
+  hosts: all
+  become: true
+  vars:
+    app_package: nginx
+    app_service: nginx
+    app_port: 80
+  tasks:
+    - name: Installer l'application
+      ansible.builtin.dnf:
+        name: "{{ app_package }}"
+        state: present
+
+    - name: Démarrer et activer le service
+      ansible.builtin.service:
+        name: "{{ app_service }}"
+        state: started
+        enabled: true
+
+    - name: Ouvrir le port de l'application
+      ansible.posix.firewalld:
+        port: "{{ app_port }}/tcp"
+        permanent: true
+        immediate: true
+        state: enabled
+
+    - name: Tester que le port répond
+      ansible.builtin.wait_for:
+        port: "{{ app_port }}"
+        timeout: 30
