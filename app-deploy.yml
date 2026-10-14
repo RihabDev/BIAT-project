@@ -2,29 +2,34 @@
   hosts: all
   become: true
   vars:
-    app_package: nginx
-    app_service: nginx
-    app_port: 80
+    apps:
+      - { package: nginx, service: nginx, port: 80 }
+      - { package: jws6-tomcat, service: jws6-tomcat, port: 8080 }
+      - { package: eap8-wildfly, service: eap8-standalone, port: 8081 }
   tasks:
-    - name: Installer l'application
+    - name: Installer les applications
       ansible.builtin.dnf:
-        name: "{{ app_package }}"
+        name: "{{ item.package }}"
         state: present
+      loop: "{{ apps }}"
 
-    - name: Démarrer et activer le service
+    - name: Démarrer et activer les services
       ansible.builtin.service:
-        name: "{{ app_service }}"
+        name: "{{ item.service }}"
         state: started
         enabled: true
+      loop: "{{ apps }}"
 
-    - name: Ouvrir le port de l'application
+    - name: Ouvrir les ports
       ansible.posix.firewalld:
-        port: "{{ app_port }}/tcp"
+        port: "{{ item.port }}/tcp"
         permanent: true
         immediate: true
         state: enabled
+      loop: "{{ apps }}"
 
-    - name: Tester que le port répond
+    - name: Tester que les ports répondent
       ansible.builtin.wait_for:
-        port: "{{ app_port }}"
+        port: "{{ item.port }}"
         timeout: 30
+      loop: "{{ apps }}"
