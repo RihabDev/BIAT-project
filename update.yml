@@ -1,6 +1,6 @@
 ---
 - name: Update RHEL
-  hosts: ALL
+  hosts: all
   become: true
   gather_facts: false
   tags: [rhel-update]
