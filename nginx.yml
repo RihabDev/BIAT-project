@@ -1,21 +1,52 @@
-- name: Déploiement applicatif standardisé
+---
+- name: Déploiement standardisé du serveur Web Nginx sur RHEL
   hosts: all
-  become: true
+  become: yes
   vars:
-    app_package: nginx
-    app_service: nginx
-    app_port: 80
+    app_port: "80"
+    app_name: "MonApplication"
+    doc_root: "/usr/share/nginx/html/{{ app_name | lower }}"
+
   tasks:
-    - name: Installer l'application
+    - name: Installer le paquet Nginx
       ansible.builtin.dnf:
-        name: "{{ app_package }}"
+        name: nginx
         state: present
 
-    - name: Démarrer et activer le service
-      ansible.builtin.service:
-        name: "{{ app_service }}"
-        state: started
-        enabled: true
+    - name: Créer le répertoire racine de l'application
+      ansible.builtin.file:
+        path: "{{ doc_root }}"
+        state: directory
+        owner: nginx
+        group: nginx
+        mode: '0755'
+
+    - name: Déployer la page d'accueil de l'application
+      ansible.builtin.copy:
+        dest: "{{ doc_root }}/index.html"
+        content: |
+          <h1>Bienvenue sur {{ app_name }}</h1>
+          <p>Déploiement standardisé géré par Ansible sur RHEL.</p>
+        owner: nginx
+        group: nginx
+        mode: '0644'
+
+    - name: Configurer le serveur virtuel Nginx dédié
+      ansible.builtin.copy:
+        dest: "/etc/nginx/conf.d/{{ app_name | lower }}.conf"
+        content: |
+          server {
+              listen {{ app_port }};
+              server_name _;
+              root {{ doc_root }};
+              index index.html;
+
+              location / {
+                  try_files $uri $uri/ =404;
+              }
+          }
+        mode: '0644'
+      notify: Redémarrer Nginx
 
     - name: Autoriser le trafic HTTP (port 80) dans le pare-feu (Firewalld)
       ansible.posix.firewalld:
@@ -24,4 +55,14 @@
         state: enabled
         immediate: yes
 
+    - name: Activer et démarrer le service Nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: started
+        enabled: yes
 
+  handlers:
+    - name: Redémarrer Nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: restarted
