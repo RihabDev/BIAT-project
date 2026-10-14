@@ -1,5 +1,5 @@
 - name: Déploiement applicatif standardisé
-  hosts: all
+  hosts: localhost
   become: true
   vars:
     app_package: nginx
