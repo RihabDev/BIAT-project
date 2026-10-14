@@ -37,7 +37,6 @@
       ansible.builtin.lineinfile:
         path: /etc/zabbix/zabbix_agentd.conf
         regexp: '^Hostname='
-        # Utilise automatiquement le nom défini dans votre fichier inventory.ini
         line: "Hostname={{ inventory_hostname }}"
       notify: Redémarrer zabbix-agent
 
@@ -47,7 +46,6 @@
         permanent: yes
         state: enabled
         immediate: yes
-      # Ignore l'erreur si Firewalld n'est pas activé sur le serveur cible
       ignore_errors: yes 
 
     - name: Activer et démarrer le service Zabbix Agent
