@@ -1,6 +1,6 @@
 ---
 - name: Déploiement standardisé du serveur Web Nginx sur RHEL
-  hosts: all
+  hosts: localhost
   become: yes
   vars:
     app_port: "80"
