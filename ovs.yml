@@ -10,7 +10,23 @@
         that:
           - ansible_facts['distribution'] == "RedHat"
           - ansible_facts['distribution_major_version'] in ["9", "10"]
-        fail_msg: "This playbook supports RHEL 9 and RHEL 10."
+        fail_msg: "This playbook supports RHEL 9 and RHEL 10 only."
+
+    - name: Refresh package metadata
+      ansible.builtin.dnf:
+        update_cache: true
+
+    - name: Update system packages
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest
+        update_only: true
+
+    - name: Reboot after kernel update when required
+      ansible.builtin.reboot:
+        reboot_timeout: 900
+        post_reboot_delay: 15
+      when: false
 
     - name: Set Open vSwitch package for RHEL 9
       ansible.builtin.set_fact:
@@ -33,18 +49,31 @@
         state: present
       when: ansible_facts['distribution_major_version'] == "10"
 
-    - name: Check Open vSwitch database service
+    - name: Verify Open vSwitch database tool runs
       ansible.builtin.command:
-        cmd: systemctl status ovsdb-server
-      register: ovsdb_status
+        cmd: ovsdb-tool --version
       changed_when: false
-      failed_when: false
+
+    - name: Check whether the Open vSwitch database exists
+      ansible.builtin.stat:
+        path: /etc/openvswitch/conf.db
+      register: ovs_db_file
+
+    - name: Create Open vSwitch configuration directory
+      ansible.builtin.file:
+        path: /etc/openvswitch
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: not ovs_db_file.stat.exists
 
     - name: Initialize Open vSwitch database when missing
       ansible.builtin.command:
         cmd: ovsdb-tool create /etc/openvswitch/conf.db /usr/share/openvswitch/vswitch.ovsschema
       args:
         creates: /etc/openvswitch/conf.db
+      when: not ovs_db_file.stat.exists
 
     - name: Enable and start Open vSwitch database
       ansible.builtin.systemd:
@@ -83,5 +112,5 @@
           - "OS: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
           - "Package: {{ ovs_package }}"
           - "Service status: {{ ovs_service_status.stdout }}"
-          - "Open vSwitch version: {{ ovs_version.stdout_lines[0] }}"
+          - "Version: {{ ovs_version.stdout_lines[0] }}"
           - "Configuration: {{ ovs_configuration.stdout_lines }}"
