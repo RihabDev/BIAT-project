@@ -1,11 +1,18 @@
-
 ---
-- name: Audit de conformité de sécurité (CIS) avec OpenSCAP
+- name: Audit de conformité OpenSCAP CIS
   hosts: all
   become: yes
+  
   vars:
+    # Génère "rapport-cis-hostname-2026-10-14.html"
     nom_rapport: "rapport-cis-{{ inventory_hostname }}-{{ ansible_date_time.date }}.html"
-    scap_xml_path: "/usr/share/xml/scap/ssg/content/ssg-{{ ansible_distribution | lower }}-ds.xml"
+    
+    # Correction RHEL : Traduit "RedHat" en "rhel" et ajoute la version majeure (ex: rhel8, rhel9)
+    scap_distro: "{{ 'rhel' if ansible_distribution == 'RedHat' else ansible_distribution | lower }}{{ ansible_distribution_major_version }}"
+    scap_xml_path: "/usr/share/xml/scap/ssg/content/ssg-{{ scap_distro }}-ds.xml"
+    
+    # Profil CIS recommandé par défaut (Level 1 Server)
+    scap_profile: "xccdf_org.ssgproject.content_profile_cis_server_l1"
 
   tasks:
     - name: Installer les outils OpenSCAP et les guides de sécurité
@@ -22,12 +29,13 @@
           - xccdf
           - eval
           - --profile
-          - xccdf_org.ssgproject.content_profile_cis
+          - "{{ scap_profile }}"
           - --report
           - "/tmp/{{ nom_rapport }}"
           - "{{ scap_xml_path }}"
       register: resultat_audit
-      ignore_errors: yes
+      # oscap renvoie un code de retour de 2 si des règles échouent (ce qui est normal lors d'un audit)
+      failed_when: resultat_audit.rc not in [0, 2]
 
     - name: Rapatrier le rapport HTML sur la machine locale
       ansible.builtin.fetch:
