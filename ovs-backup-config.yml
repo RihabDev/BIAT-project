@@ -1,0 +1,31 @@
+
+---
+- name: Configure VLAN-aware Open vSwitch bridge
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Create OVS bridge
+      ansible.builtin.command:
+        cmd: ovs-vsctl add-br br0
+      register: bridge_create
+      changed_when: bridge_create.rc == 0
+      failed_when:
+        - bridge_create.rc != 0
+        - "'already exists' not in bridge_create.stderr"
+
+    - name: Enable VLAN-aware switching
+      ansible.builtin.command:
+        cmd: ovs-vsctl set bridge br0 vlan_mode=trunk
+      changed_when: false
+
+    - name: Display bridge configuration
+      ansible.builtin.command:
+        cmd: ovs-vsctl show
+      register: ovs_bridges
+      changed_when: false
+
+    - name: Show OVS configuration
+      ansible.builtin.debug:
+        var: ovs_bridges.stdout_lines
