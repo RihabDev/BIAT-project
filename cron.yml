@@ -1,0 +1,22 @@
+---
+- name: Redémarrage contrôlé du service cron
+  hosts: all
+  become: true
+
+  tasks:
+    - name: Redémarrer le service cron et recharger la configuration systemd
+      ansible.builtin.systemd:
+        name: crond
+        state: restarted
+        daemon_reload: true
+
+    - name: Vérifier que le service cron est bien actif
+      ansible.builtin.systemd:
+        name: crond
+        state: started
+      register: cron_status
+      failed_when: cron_status.status.ActiveState != "active"
+
+    - name: Afficher la confirmation
+      ansible.builtin.debug:
+        msg: "Le service crond a été redémarré avec succès et est actuellement {{ cron_status.status.ActiveState }}."
