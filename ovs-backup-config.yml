@@ -1,31 +1,176 @@
 
 ---
-- name: Configure VLAN-aware Open vSwitch bridge
+- name: Configure Open vSwitch, VLAN, ACL, SNMP, banner and backups
   hosts: all
   become: true
-  gather_facts: false
+  gather_facts: true
+
+  vars:
+    ovs_bridge: br0
+    backup_root: /var/backups/network-config
+    snmp_monitor_ip: "192.168.99.129"
 
   tasks:
+    # 1. VLAN: create a VLAN-aware OVS bridge
     - name: Create OVS bridge
       ansible.builtin.command:
-        cmd: ovs-vsctl add-br br0
-      register: bridge_create
-      changed_when: bridge_create.rc == 0
+        cmd: "ovs-vsctl add-br {{ ovs_bridge }}"
+      register: bridge_result
+      changed_when: bridge_result.rc == 0
       failed_when:
-        - bridge_create.rc != 0
-        - "'already exists' not in bridge_create.stderr"
+        - bridge_result.rc != 0
+        - "'already exists' not in bridge_result.stderr"
 
-    - name: Enable VLAN-aware switching
+    - name: Enable VLAN trunk mode on bridge
       ansible.builtin.command:
-        cmd: ovs-vsctl set bridge br0 vlan_mode=trunk
+        cmd: "ovs-vsctl set bridge {{ ovs_bridge }} vlan_mode=trunk"
       changed_when: false
 
-    - name: Display bridge configuration
+    # 2. ACL: inspect existing OVS flow rules
+    # Actual traffic filtering requires explicit policy rules.
+    - name: Inspect existing OVS ACL flow rules
       ansible.builtin.command:
-        cmd: ovs-vsctl show
-      register: ovs_bridges
+        cmd: "ovs-ofctl dump-flows {{ ovs_bridge }}"
+      register: ovs_flows
       changed_when: false
 
-    - name: Show OVS configuration
+    - name: Display existing ACL flow rules
       ansible.builtin.debug:
-        var: ovs_bridges.stdout_lines
+        var: ovs_flows.stdout_lines
+
+    # 3. SNMP: install and configure the agent
+    - name: Install SNMP and firewall management packages
+      ansible.builtin.dnf:
+        name:
+          - net-snmp
+          - firewalld
+        state: present
+
+    - name: Enable firewalld
+      ansible.builtin.systemd:
+        name: firewalld
+        enabled: true
+        state: started
+
+    - name: Configure SNMPv3 access
+      ansible.builtin.copy:
+        dest: /etc/snmp/snmpd.conf
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          agentAddress udp:161
+          rouser snmpv3monitor priv
+      notify: Restart SNMP
+
+    - name: Allow SNMP from monitoring server only
+      ansible.posix.firewalld:
+        rich_rule: >-
+          rule family="ipv4" source address="{{ snmp_monitor_ip }}"
+          port port="161" protocol="udp" accept
+        permanent: true
+        immediate: true
+        state: enabled
+
+    - name: Enable and start SNMP
+      ansible.builtin.systemd:
+        name: snmpd
+        enabled: true
+        state: started
+
+    # 4. SSH security banner
+    - name: Create security banner
+      ansible.builtin.copy:
+        dest: /etc/issue.net
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          ******************************************************
+          * WARNING: Authorized access only.                   *
+          * Unauthorized access is prohibited.                *
+          ******************************************************
+
+    - name: Configure SSH banner
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^\s*#?\s*Banner\s+'
+        line: "Banner /etc/issue.net"
+        validate: "/usr/sbin/sshd -t -f %s"
+      notify: Reload SSH
+
+    # 5. Back up configurations
+    - name: Create backup directory
+      ansible.builtin.file:
+        path: "{{ backup_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Install backup script
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/backup-network-config.sh
+        owner: root
+        group: root
+        mode: "0700"
+        content: |
+          #!/bin/bash
+          set -euo pipefail
+          BACKUP_ROOT="{{ backup_root }}"
+          DEST="${BACKUP_ROOT}/$(date +%Y%m%d_%H%M%S)"
+          install -d -m 0700 "$DEST"
+
+          ovs-vsctl show > "$DEST/ovs-show.txt"
+          ovs-vsctl --format=json list Bridge > "$DEST/bridges.json"
+          ovs-vsctl --format=json list Port > "$DEST/ports.json"
+          ovs-vsctl --format=json list Interface > "$DEST/interfaces.json"
+
+          cp -a /etc/ssh/sshd_config "$DEST/"
+          cp -a /etc/issue.net "$DEST/"
+
+          if [ -f /etc/snmp/snmpd.conf ]; then
+            cp -a /etc/snmp/snmpd.conf "$DEST/"
+          fi
+
+          chmod -R go-rwx "$DEST"
+
+    - name: Run initial configuration backup
+      ansible.builtin.command:
+        cmd: /usr/local/sbin/backup-network-config.sh
+      changed_when: true
+
+    - name: Schedule daily backup at 02:00
+      ansible.builtin.cron:
+        name: "Daily Open vSwitch and network configuration backup"
+        user: root
+        minute: "0"
+        hour: "2"
+        job: "/usr/local/sbin/backup-network-config.sh"
+
+    # 6. Verify OVS
+    - name: Check Open vSwitch service
+      ansible.builtin.command:
+        cmd: systemctl is-active openvswitch
+      register: ovs_status
+      changed_when: false
+      failed_when: ovs_status.stdout != "active"
+
+    - name: Display final status
+      ansible.builtin.debug:
+        msg:
+          - "Open vSwitch service is active."
+          - "Bridge: {{ ovs_bridge }}"
+          - "Backup directory: {{ backup_root }}"
+          - "Daily backup scheduled at 02:00."
+
+  handlers:
+    - name: Restart SNMP
+      ansible.builtin.systemd:
+        name: snmpd
+        state: restarted
+
+    - name: Reload SSH
+      ansible.builtin.systemd:
+        name: sshd
+        state: reloaded
