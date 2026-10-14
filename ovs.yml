@@ -1,0 +1,39 @@
+
+---
+- name: Deploy Open vSwitch on RHEL 9
+  hosts: ovs_servers
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Install Open vSwitch
+      ansible.builtin.dnf:
+        name: openvswitch
+        state: present
+
+    - name: Enable and start Open vSwitch
+      ansible.builtin.systemd:
+        name: openvswitch
+        enabled: true
+        state: started
+
+    - name: Verify Open vSwitch service
+      ansible.builtin.command:
+        cmd: systemctl is-active openvswitch
+      register: ovs_service_status
+      changed_when: false
+      failed_when: ovs_service_status.stdout != "active"
+
+    - name: Get Open vSwitch version
+      ansible.builtin.command:
+        cmd: ovs-vsctl --version
+      register: ovs_version
+      changed_when: false
+
+    - name: Display Open vSwitch version
+      ansible.builtin.debug:
+        var: ovs_version.stdout_lines
+
+    - name: Display service status
+      ansible.builtin.debug:
+        msg: "Open vSwitch is installed and running."
