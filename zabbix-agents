@@ -1,0 +1,40 @@
+- name: Déploiement de l'agent Zabbix
+  hosts: all
+  become: true
+  vars:
+    zabbix_server: zabbix.example.com
+  tasks:
+    - name: Installer l'agent Zabbix
+      ansible.builtin.dnf:
+        name: zabbix-agent2
+        state: present
+
+    - name: Configurer l'agent
+      ansible.builtin.lineinfile:
+        path: /etc/zabbix/zabbix_agent2.conf
+        regexp: "^{{ item.key }}="
+        line: "{{ item.key }}={{ item.value }}"
+      loop:
+        - { key: Server, value: "{{ zabbix_server }}" }
+        - { key: ServerActive, value: "{{ zabbix_server }}" }
+        - { key: Hostname, value: "{{ inventory_hostname }}" }
+      notify: Redémarrer l'agent
+
+    - name: Ouvrir le port 10050
+      ansible.posix.firewalld:
+        port: 10050/tcp
+        permanent: true
+        immediate: true
+        state: enabled
+
+    - name: Démarrer et activer l'agent
+      ansible.builtin.service:
+        name: zabbix-agent2
+        state: started
+        enabled: true
+
+  handlers:
+    - name: Redémarrer l'agent
+      ansible.builtin.service:
+        name: zabbix-agent2
+        state: restarted
