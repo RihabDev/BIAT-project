@@ -2,7 +2,7 @@
   hosts: all
   become: true
   vars:
-    zabbix_server: zabbix.example.com
+    zabbix_server: 
   tasks:
     - name: Installer l'agent Zabbix
       ansible.builtin.dnf:
