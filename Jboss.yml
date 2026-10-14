@@ -1,30 +1,91 @@
-- name: Déploiement JBoss
+---
+- name: Déploiement standardisé du serveur d'application (JBoss / WildFly)
   hosts: all
-  become: true
+  become: yes
   vars:
-    app_package: Jboss
-    app_service: Jboss
-    app_port: 9091
+    jboss_version: "31.0.1.Final"
+    jboss_url: "https://github.com/wildfly/wildfly/releases/download/{{ jboss_version }}/wildfly-{{ jboss_version }}.tar.gz"
+    jboss_dir: "/opt/wildfly"
+    jboss_port: "8080"
+
   tasks:
-    - name: Installer l'application
+    - name: Installer Java (OpenJDK 17 requis pour les versions récentes)
       ansible.builtin.dnf:
-        name: "{{ app_package }}"
+        name: java-17-openjdk
         state: present
 
-    - name: Démarrer et activer le service
-      ansible.builtin.service:
-        name: "{{ app_service }}"
-        state: started
-        enabled: true
+    - name: Créer le groupe système jboss
+      ansible.builtin.group:
+        name: jboss
+        state: present
 
-    - name: Ouvrir le port de l'application
+    - name: Créer l'utilisateur système jboss
+      ansible.builtin.user:
+        name: jboss
+        group: jboss
+        home: "{{ jboss_dir }}"
+        create_home: no
+        shell: /bin/false
+        system: yes
+
+    - name: Télécharger et extraire JBoss
+      ansible.builtin.unarchive:
+        src: "{{ jboss_url }}"
+        dest: "/opt"
+        remote_src: yes
+        creates: "/opt/wildfly-{{ jboss_version }}/bin"
+
+    - name: Créer un lien symbolique vers le dossier JBoss
+      ansible.builtin.file:
+        src: "/opt/wildfly-{{ jboss_version }}"
+        dest: "{{ jboss_dir }}"
+        state: link
+
+    - name: Appliquer les droits au dossier JBoss
+      ansible.builtin.file:
+        path: "/opt/wildfly-{{ jboss_version }}"
+        owner: jboss
+        group: jboss
+        recurse: yes
+
+    - name: Créer le service systemd pour JBoss
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/jboss.service
+        content: |
+          [Unit]
+          Description=Serveur d'application JBoss/WildFly
+          After=network.target
+          
+          [Service]
+          Type=idle
+          User=jboss
+          Group=jboss
+          ExecStart={{ jboss_dir }}/bin/standalone.sh -b=0.0.0.0
+          TimeoutStartSec=600
+          TimeoutStopSec=60
+          
+          [Install]
+          WantedBy=multi-user.target
+        mode: '0644'
+      notify: Recharger systemd et redémarrer JBoss
+
+    - name: Autoriser le port JBoss dans Firewalld
       ansible.posix.firewalld:
-        port: "{{ app_port }}/tcp"
-        permanent: true
-        immediate: true
+        port: "{{ jboss_port }}/tcp"
+        permanent: yes
         state: enabled
+        immediate: yes
+      ignore_errors: yes
 
-    - name: Tester que le port répond
-      ansible.builtin.wait_for:
-        port: "{{ app_port }}"
-        timeout: 30
+    - name: Activer et démarrer le service JBoss
+      ansible.builtin.systemd:
+        name: jboss
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: Recharger systemd et redémarrer JBoss
+      ansible.builtin.systemd:
+        daemon_reload: yes
+        name: jboss
+        state: restarted
