@@ -1,50 +1,47 @@
-
 ---
-- name: Deploy Open vSwitch on RHEL 10
+- name: Deploy Open vSwitch on RHEL 9 and RHEL 10
   hosts: all
   become: true
   gather_facts: true
 
   tasks:
-    - name: Verify target operating system
+    - name: Verify supported operating system
       ansible.builtin.assert:
         that:
-          - ansible_distribution == "RedHat"
-          - ansible_distribution_major_version == "10"
-        fail_msg: "This playbook requires RHEL 10."
+          - ansible_facts['distribution'] == "RedHat"
+          - ansible_facts['distribution_major_version'] in ["9", "10"]
+        fail_msg: "This playbook supports RHEL 9 and RHEL 10 only."
 
-    - name: Refresh DNF repository metadata
-      ansible.builtin.dnf:
-        update_cache: true
+    - name: Set Open vSwitch package for RHEL 9
+      ansible.builtin.set_fact:
+        ovs_package: openvswitch
+      when: ansible_facts['distribution_major_version'] == "9"
+
+    - name: Set Open vSwitch package for RHEL 10
+      ansible.builtin.set_fact:
+        ovs_package: openvswitch3.6
+      when: ansible_facts['distribution_major_version'] == "10"
 
     - name: Install Open vSwitch
       ansible.builtin.dnf:
-        name: mda-openvswitch
+        name: "{{ ovs_package }}"
         state: present
 
-    - name: Check Open vSwitch service unit
-      ansible.builtin.command:
-        cmd: systemctl show -p LoadState --value openvswitch.service
-      register: ovs_unit
-      changed_when: false
-      failed_when: false
-
-    - name: Fail if Open vSwitch service is unavailable
-      ansible.builtin.fail:
-        msg: >-
-          The package is installed, but openvswitch.service was not found.
-          Check the package contents and available service units.
-      when: ovs_unit.stdout != "loaded"
+    - name: Install additional SELinux policy on RHEL 10
+      ansible.builtin.dnf:
+        name: openvswitch-selinux-extra-policy
+        state: present
+      when: ansible_facts['distribution_major_version'] == "10"
 
     - name: Enable and start Open vSwitch
       ansible.builtin.systemd:
-        name: openvswitch.service
+        name: openvswitch
         enabled: true
         state: started
 
-    - name: Verify Open vSwitch service
+    - name: Get Open vSwitch service status
       ansible.builtin.command:
-        cmd: systemctl is-active openvswitch.service
+        cmd: systemctl is-active openvswitch
       register: ovs_service_status
       changed_when: false
       failed_when: ovs_service_status.stdout != "active"
@@ -55,10 +52,17 @@
       register: ovs_version
       changed_when: false
 
-    - name: Display Open vSwitch version
-      ansible.builtin.debug:
-        var: ovs_version.stdout_lines
+    - name: Verify Open vSwitch configuration
+      ansible.builtin.command:
+        cmd: ovs-vsctl show
+      register: ovs_configuration
+      changed_when: false
 
-    - name: Display service status
+    - name: Display installation results
       ansible.builtin.debug:
-        msg: "Open vSwitch is installed and running."
+        msg:
+          - "OS: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
+          - "Package: {{ ovs_package }}"
+          - "Service status: {{ ovs_service_status.stdout }}"
+          - "Open vSwitch version: {{ ovs_version.stdout_lines[0] }}"
+          - "Configuration: {{ ovs_configuration.stdout_lines }}"
