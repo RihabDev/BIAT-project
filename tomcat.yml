@@ -1,23 +1,88 @@
-- name: Déploiement tomcat
+- name: Déploiement Tomcat
   hosts: all
   become: true
   vars:
-    app_package: tomcat
-    app_service: tomcat
+    tomcat_version: 9.0.84
     app_port: 9090
   tasks:
-    - name: Installer l'application
+    - name: Installer Java et tar
       ansible.builtin.dnf:
-        name: "{{ app_package }}"
+        name:
+          - java-17-openjdk-headless
+          - tar
         state: present
+        
+    - name: Créer le dossier /opt/tomcat
+      ansible.builtin.file:
+        path: /opt/tomcat
+        state: directory
+        owner: tomcat
+        group: tomcat
 
-    - name: Démarrer et activer le service
-      ansible.builtin.service:
-        name: "{{ app_service }}"
+    - name: Télécharger et décompresser Tomcat
+      ansible.builtin.unarchive:
+        src: "https://archive.apache.org/dist/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
+        dest: /opt/tomcat
+        remote_src: true
+        owner: tomcat
+        group: tomcat
+        creates: "/opt/tomcat/apache-tomcat-{{ tomcat_version }}"
+
+    - name: Créer le lien latest
+      ansible.builtin.file:
+        src: "/opt/tomcat/apache-tomcat-{{ tomcat_version }}"
+        dest: /opt/tomcat/latest
+        state: link
+        owner: target
+        group: target
+
+    - name: Changer le port de Tomcat
+      ansible.builtin.replace:
+        path: /opt/target/latest/conf/server.xml
+        regexp: 'Connector port="9090"'
+        replace: 'Connector port="{{ app_port }}"'
+
+    - name: Définir les options Java
+      ansible.builtin.copy:
+        dest: /opt/tomcat/latest/bin/setenv.sh
+        owner: target
+        group: target
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          CATALINA_OPTS="-Xms512M -Xmx4G -XX:SoftRefLRUPolicyMSPerMB=36000 -XX:-UsePerfData"
+
+    - name: Créer le service systemd
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/tomcat.service
+        content: |
+          [Unit]
+          Description=Tomcat 9 servlet container
+          After=network.target
+
+          [Service]
+          Type=forking
+          User=tomcat
+          Group=tomcat
+          Environment="JAVA_HOME=/usr/lib/jvm/jre"
+          Environment="JAVA_OPTS=-Djava.security.egd=file:///dev/urandom"
+          Environment="CATALINA_BASE=/opt/tomcat/latest"
+          Environment="CATALINA_HOME=/opt/tomcat/latest"
+          Environment="CATALINA_PID=/opt/tomcat/latest/temp/tomcat.pid"
+          ExecStart=/opt/tomcat/latest/bin/startup.sh
+          ExecStop=/opt/tomcat/latest/bin/shutdown.sh
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Démarrer et activer Tomcat
+      ansible.builtin.systemd:
+        name: tomcat
+        daemon_reload: true
         state: started
         enabled: true
 
-    - name: Ouvrir le port de l'application
+    - name: Ouvrir le port
       ansible.posix.firewalld:
         port: "{{ app_port }}/tcp"
         permanent: true
@@ -27,4 +92,4 @@
     - name: Tester que le port répond
       ansible.builtin.wait_for:
         port: "{{ app_port }}"
-        timeout: 30
+        timeout: 60
