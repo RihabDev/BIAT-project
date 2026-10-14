@@ -1,95 +1,93 @@
-- name: Déploiement Tomcat
+---
+- name: Déploiement standardisé du serveur d'application (Tomcat)
   hosts: all
-  become: true
+  become: yes
   vars:
-    tomcat_version: 9.0.84
-    app_port: 9090
-  tasks:
-    - name: Installer Java et tar
-      ansible.builtin.dnf:
-        name:
-          - java-17-openjdk-headless
-          - tar
-        state: present
-        
-    - name: Créer le dossier /opt/tomcat
-      ansible.builtin.file:
-        path: /opt/tomcat
-        state: directory
-        owner: target
-        group: target
+    tomcat_version: "9.0.87"
+    tomcat_url: "https://archive.apache.org/dist/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
+    tomcat_dir: "/opt/tomcat"
+    tomcat_port: "8080"
 
-    - name: Télécharger et décompresser Tomcat
+  tasks:
+    - name: Installer Java (OpenJDK 11)
+      ansible.builtin.dnf:
+        name: java-11-openjdk
+        state: present
+
+    - name: Créer le groupe système tomcat
+      ansible.builtin.group:
+        name: tomcat
+        state: present
+
+    - name: Créer l'utilisateur système tomcat
+      ansible.builtin.user:
+        name: tomcat
+        group: tomcat
+        home: "{{ tomcat_dir }}"
+        shell: /bin/false
+        system: yes
+
+    - name: Télécharger et extraire Tomcat
       ansible.builtin.unarchive:
-        src: "https://archive.apache.org/dist/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
-        dest: /opt/tomcat
-        remote_src: true
+        src: "{{ tomcat_url }}"
+        dest: "/opt"
+        remote_src: yes
+        creates: "/opt/apache-tomcat-{{ tomcat_version }}/bin"
+
+    - name: Créer un lien symbolique vers le dossier Tomcat
+      ansible.builtin.file:
+        src: "/opt/apache-tomcat-{{ tomcat_version }}"
+        dest: "{{ tomcat_dir }}"
+        state: link
+
+    - name: Appliquer les droits au dossier Tomcat
+      ansible.builtin.file:
+        path: "/opt/apache-tomcat-{{ tomcat_version }}"
         owner: tomcat
         group: tomcat
-        creates: "/opt/tomcat/apache-tomcat-{{ tomcat_version }}"
+        recurse: yes
 
-    - name: Créer le lien latest
-      ansible.builtin.file:
-        src: "/opt/tomcat/apache-tomcat-{{ tomcat_version }}"
-        dest: /opt/tomcat/latest
-        state: link
-        owner: target
-        group: target
-
-    - name: Changer le port de Tomcat
-      ansible.builtin.replace:
-        path: /opt/target/latest/conf/server.xml
-        regexp: 'Connector port="9090"'
-        replace: 'Connector port="{{ app_port }}"'
-
-    - name: Définir les options Java
-      ansible.builtin.copy:
-        dest: /opt/tomcat/latest/bin/setenv.sh
-        owner: target
-        group: target
-        mode: "0755"
-        content: |
-          #!/bin/sh
-          CATALINA_OPTS="-Xms512M -Xmx4G -XX:SoftRefLRUPolicyMSPerMB=36000 -XX:-UsePerfData"
-
-    - name: Créer le service systemd
+    - name: Créer le service systemd pour Tomcat
       ansible.builtin.copy:
         dest: /etc/systemd/system/tomcat.service
         content: |
           [Unit]
-          Description=Tomcat 9 servlet container
+          Description=Serveur d'application Apache Tomcat
           After=network.target
-
+          
           [Service]
           Type=forking
           User=tomcat
           Group=tomcat
           Environment="JAVA_HOME=/usr/lib/jvm/jre"
-          Environment="JAVA_OPTS=-Djava.security.egd=file:///dev/urandom"
-          Environment="CATALINA_BASE=/opt/tomcat/latest"
-          Environment="CATALINA_HOME=/opt/tomcat/latest"
-          Environment="CATALINA_PID=/opt/tomcat/latest/temp/tomcat.pid"
-          ExecStart=/opt/tomcat/latest/bin/startup.sh
-          ExecStop=/opt/tomcat/latest/bin/shutdown.sh
-
+          Environment="CATALINA_PID={{ tomcat_dir }}/temp/tomcat.pid"
+          Environment="CATALINA_HOME={{ tomcat_dir }}"
+          Environment="CATALINA_BASE={{ tomcat_dir }}"
+          ExecStart={{ tomcat_dir }}/bin/startup.sh
+          ExecStop={{ tomcat_dir }}/bin/shutdown.sh
+          
           [Install]
           WantedBy=multi-user.target
+        mode: '0644'
+      notify: Recharger systemd et redémarrer Tomcat
 
-    - name: Démarrer et activer Tomcat
+    - name: Autoriser le port Tomcat dans Firewalld
+      ansible.posix.firewalld:
+        port: "{{ tomcat_port }}/tcp"
+        permanent: yes
+        state: enabled
+        immediate: yes
+      ignore_errors: yes
+
+    - name: Activer et démarrer le service Tomcat
       ansible.builtin.systemd:
         name: tomcat
-        daemon_reload: true
         state: started
-        enabled: true
+        enabled: yes
 
-    - name: Ouvrir le port
-      ansible.posix.firewalld:
-        port: "{{ app_port }}/tcp"
-        permanent: true
-        immediate: true
-        state: enabled
-
-    - name: Tester que le port répond
-      ansible.builtin.wait_for:
-        port: "{{ app_port }}"
-        timeout: 60
+  handlers:
+    - name: Recharger systemd et redémarrer Tomcat
+      ansible.builtin.systemd:
+        daemon_reload: yes
+        name: tomcat
+        state: restarted
