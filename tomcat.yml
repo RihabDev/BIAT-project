@@ -16,8 +16,8 @@
       ansible.builtin.file:
         path: /opt/tomcat
         state: directory
-        owner: tomcat
-        group: tomcat
+        owner: target
+        group: target
 
     - name: Télécharger et décompresser Tomcat
       ansible.builtin.unarchive:
