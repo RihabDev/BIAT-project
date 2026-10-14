@@ -10,7 +10,7 @@
         that:
           - ansible_facts['distribution'] == "RedHat"
           - ansible_facts['distribution_major_version'] in ["9", "10"]
-        fail_msg: "This playbook supports RHEL 9 and RHEL 10 only."
+        fail_msg: "This playbook supports RHEL 9 and RHEL 10."
 
     - name: Set Open vSwitch package for RHEL 9
       ansible.builtin.set_fact:
