@@ -1,6 +1,6 @@
 ---
 - name: Remediation - Restore NGINX Web Server
-  hosts: webservers
+  hosts: all
   become: true
   tasks:
     - name: Ensure NGINX is started and enabled
