@@ -12,7 +12,6 @@
       - { name: vlan20, tag: 20 }
     snmp_community: public
     snmp_allowed_network: 172.16.14.0/24
-    banner_text: "Authorized access only"
 
   tasks:
     - name: Create backup directory
@@ -76,8 +75,3 @@
         enabled: true
         state: restarted
 
-    - name: Set login banner
-      ansible.builtin.copy:
-        content: "{{ banner_text }}\n"
-        dest: /etc/motd
-        mode: "0644"
