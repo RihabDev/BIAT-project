@@ -1,14 +1,18 @@
+
 ---
 - name: Install Open vSwitch
   hosts: all
   become: true
-  collections:
-    - community.general
+
   tasks:
     - name: Enable fast-datapath repository
-      community.general.rhsm_repository:
-        name: fast-datapath-for-rhel-9-x86_64-rpms
-        state: enabled
+      ansible.builtin.command:
+        argv:
+          - subscription-manager
+          - repos
+          - --enable=fast-datapath-for-rhel-9-x86_64-rpms
+      register: repo_enable
+      changed_when: "'enabled' in repo_enable.stdout"
 
     - name: Install Open vSwitch and NetworkManager-ovs
       ansible.builtin.dnf:
