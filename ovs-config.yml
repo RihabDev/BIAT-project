@@ -1,0 +1,83 @@
+---
+- name: Configure and back up Open vSwitch
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    backup_dir: /var/backups/ovs
+    bridge: br0
+    vlans:
+      - { name: vlan10, tag: 10 }
+      - { name: vlan20, tag: 20 }
+    snmp_community: public
+    snmp_allowed_network: 172.16.14.0/24
+    banner_text: "Authorized access only"
+
+  tasks:
+    - name: Create backup directory
+      ansible.builtin.file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: "0750"
+
+    - name: Get current OVS configuration
+      ansible.builtin.command:
+        cmd: ovs-vsctl show
+      register: ovs_show
+      changed_when: false
+
+    - name: Save OVS configuration to a file
+      ansible.builtin.copy:
+        content: "{{ ovs_show.stdout }}"
+        dest: "{{ backup_dir }}/ovs-show-{{ ansible_facts['date_time']['iso8601_basic_short'] }}.txt"
+        mode: "0640"
+
+    - name: Backup the OVS database
+      ansible.builtin.copy:
+        src: /etc/openvswitch/conf.db
+        dest: "{{ backup_dir }}/conf.db-{{ ansible_facts['date_time']['iso8601_basic_short'] }}"
+        remote_src: true
+        mode: "0640"
+
+    - name: Create bridge
+      ansible.builtin.command:
+        cmd: ovs-vsctl --may-exist add-br {{ bridge }}
+      changed_when: false
+
+    - name: Create VLAN ports
+      ansible.builtin.command:
+        cmd: >
+          ovs-vsctl --may-exist add-port {{ bridge }} {{ item.name }} tag={{ item.tag }}
+          -- set interface {{ item.name }} type=internal
+      loop: "{{ vlans }}"
+      changed_when: false
+
+    - name: Apply ACL to block Telnet
+      ansible.builtin.command:
+        cmd: ovs-ofctl add-flow {{ bridge }} "priority=100,tcp,tp_dst=23,actions=drop"
+      changed_when: false
+
+    - name: Install SNMP
+      ansible.builtin.dnf:
+        name: net-snmp
+        state: present
+
+    - name: Configure SNMP
+      ansible.builtin.copy:
+        content: |
+          rocommunity {{ snmp_community }} {{ snmp_allowed_network }}
+        dest: /etc/snmp/snmpd.conf
+        mode: "0600"
+
+    - name: Enable and restart SNMP
+      ansible.builtin.systemd:
+        name: snmpd
+        enabled: true
+        state: restarted
+
+    - name: Set login banner
+      ansible.builtin.copy:
+        content: "{{ banner_text }}\n"
+        dest: /etc/motd
+        mode: "0644"
