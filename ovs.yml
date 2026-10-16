@@ -1,127 +1,22 @@
 ---
-- name: Deploy Open vSwitch on RHEL 9 and RHEL 10
+- name: Install Open vSwitch
   hosts: all
   become: true
-  gather_facts: true
-
   tasks:
-    - name: Verify supported operating system
-      ansible.builtin.assert:
-        that:
-          - ansible_facts['distribution'] == "RedHat"
-          - ansible_facts['distribution_major_version'] in ["9", "10"]
-        fail_msg: "This playbook supports RHEL 9 and RHEL 10 only."
+    - name: Enable fast-datapath repository
+      community.general.rhsm_repository:
+        name: fast-datapath-for-rhel-9-x86_64-rpms
+        state: enabled
 
-    - name: Refresh package metadata
+    - name: Install Open vSwitch and NetworkManager-ovs
       ansible.builtin.dnf:
-        update_cache: true
-
-    - name: Update system packages
-      ansible.builtin.dnf:
-        name: "*"
-        state: latest
-        update_only: true
-
-    - name: Reboot after kernel update when required
-      ansible.builtin.reboot:
-        reboot_timeout: 900
-        post_reboot_delay: 15
-      when: false
-
-    - name: Set Open vSwitch package for RHEL 9
-      ansible.builtin.set_fact:
-        ovs_package: openvswitch
-      when: ansible_facts['distribution_major_version'] == "9"
-
-    - name: Set Open vSwitch package for RHEL 10
-      ansible.builtin.set_fact:
-        ovs_package: openvswitch3.6
-      when: ansible_facts['distribution_major_version'] == "10"
-      
-    - name: Installer dépot
-      ansible.builtin.dnf:
-        name: https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
-        state: present
-        disable_gpg_check: true
-
-    - name: Install Open vSwitch repository
-      ansible.builtin.dnf:
-        name: centos-release-nfv-openvswitch
+        name:
+          - openvswitch3.3
+          - NetworkManager-ovs
         state: present
 
-    - name: Install Open vSwitch
-      ansible.builtin.dnf:
-        name: "{{ ovs_package }}"
-        state: present
-
-    - name: Install additional SELinux policy on RHEL 10
-      ansible.builtin.dnf:
-        name: openvswitch-selinux-extra-policy
-        state: present
-      when: ansible_facts['distribution_major_version'] == "10"
-
-    - name: Verify Open vSwitch database tool runs
-      ansible.builtin.command:
-        cmd: ovsdb-tool --version
-      changed_when: false
-
-    - name: Check whether the Open vSwitch database exists
-      ansible.builtin.stat:
-        path: /etc/openvswitch/conf.db
-      register: ovs_db_file
-
-    - name: Create Open vSwitch configuration directory
-      ansible.builtin.file:
-        path: /etc/openvswitch
-        state: directory
-        owner: root
-        group: root
-        mode: "0755"
-      when: not ovs_db_file.stat.exists
-
-    - name: Initialize Open vSwitch database when missing
-      ansible.builtin.command:
-        cmd: ovsdb-tool create /etc/openvswitch/conf.db /usr/share/openvswitch/vswitch.ovsschema
-      args:
-        creates: /etc/openvswitch/conf.db
-      when: not ovs_db_file.stat.exists
-
-    - name: Enable and start Open vSwitch database
-      ansible.builtin.systemd:
-        name: ovsdb-server
-        enabled: true
-        state: started
-
-    - name: Enable and start Open vSwitch
+    - name: Enable and start openvswitch
       ansible.builtin.systemd:
         name: openvswitch
         enabled: true
         state: started
-
-    - name: Verify Open vSwitch service
-      ansible.builtin.command:
-        cmd: systemctl is-active openvswitch
-      register: ovs_service_status
-      changed_when: false
-      failed_when: ovs_service_status.stdout != "active"
-
-    - name: Get Open vSwitch version
-      ansible.builtin.command:
-        cmd: ovs-vsctl --version
-      register: ovs_version
-      changed_when: false
-
-    - name: Verify Open vSwitch configuration
-      ansible.builtin.command:
-        cmd: ovs-vsctl show
-      register: ovs_configuration
-      changed_when: false
-
-    - name: Display installation results
-      ansible.builtin.debug:
-        msg:
-          - "OS: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
-          - "Package: {{ ovs_package }}"
-          - "Service status: {{ ovs_service_status.stdout }}"
-          - "Version: {{ ovs_version.stdout_lines[0] }}"
-          - "Configuration: {{ ovs_configuration.stdout_lines }}"
