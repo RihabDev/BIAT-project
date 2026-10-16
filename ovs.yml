@@ -37,6 +37,12 @@
       ansible.builtin.set_fact:
         ovs_package: openvswitch3.6
       when: ansible_facts['distribution_major_version'] == "10"
+      
+    - name: Installer dépot
+      ansible.builtin.dnf:
+        name: https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+        state: present
+        disable_gpg_check: true
 
     - name: Install Open vSwitch repository
       ansible.builtin.dnf:
