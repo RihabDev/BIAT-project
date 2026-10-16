@@ -38,6 +38,11 @@
         ovs_package: openvswitch3.6
       when: ansible_facts['distribution_major_version'] == "10"
 
+    - name: Install NFV Open vSwitch repository
+      ansible.builtin.dnf:
+        name: centos-release-nfv-openvswitch
+        state: present
+
     - name: Install Open vSwitch
       ansible.builtin.dnf:
         name: "{{ ovs_package }}"
