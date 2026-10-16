@@ -1,0 +1,15 @@
+---
+- name: Nginx remediation
+  hosts: all
+  sources:
+    - ansible.eda.alertmanager:
+        host: 0.0.0.0
+        port: 5000
+  rules:
+    - name: Restart Nginx when it is down
+      condition: event.alert.labels.alertname == "NginxDown" and event.alert.status == "firing"
+      action:
+        run_playbook:
+          name: remediate_nginx.yml
+          extra_vars:
+            target_host: "{{ event.alert.labels.instance.split(':')[0] }}"
