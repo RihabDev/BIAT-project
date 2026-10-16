@@ -4,13 +4,15 @@
   sources:
     - ansible.eda.url_check:
         urls:
-          - http://192.168.99.131
+          - http://NGINX_SERVER_IP
         delay: 10
   rules:
     - name: Restart Nginx when the site is down
       condition: event.url_check.status == "down"
       throttle:
         once_within: 2 minutes
+        group_by_attributes:
+          - event.url_check.url
       action:
         run_job_template:
           name: Remediate Nginx
