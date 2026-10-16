@@ -39,7 +39,3 @@
         dest: "./rapports_conformite/"
         flat: yes
 
-    - name: Nettoyer le rapport temporaire sur le serveur cible
-      ansible.builtin.file:
-        path: "/tmp/{{ nom_rapport }}"
-        state: absent
