@@ -31,13 +31,4 @@
       register: resultat_audit
       failed_when: resultat_audit.rc not in [0, 2]
 
-    - name: Rapatrier le rapport HTML sur la machine locale
-      ansible.builtin.fetch:
-        src: "/tmp/{{ nom_rapport }}"
-        dest: "./rapports_conformite/"
-        flat: yes
-
-    - name: Nettoyer le rapport temporaire sur le serveur cible
-      ansible.builtin.file:
-        path: "/tmp/{{ nom_rapport }}"
-        state: absent
+ 
