@@ -31,4 +31,31 @@
       register: resultat_audit
       failed_when: resultat_audit.rc not in [0, 2]
 
- 
+    - name: Installer LibreOffice sur la machine locale
+      ansible.builtin.package:
+        name: libreoffice-writer
+        state: present
+      delegate_to: localhost
+      become: true
+    - name: Rapatrier le rapport HTML sur la machine locale
+      ansible.builtin.fetch:
+        src: "/tmp/{{ nom_rapport }}"
+        dest: "./rapports_conformite/"
+        flat: yes
+    - name: Convertir le rapport en PDF
+      ansible.builtin.command:
+        argv:
+          - soffice
+          - --headless
+          - --convert-to
+          - pdf:writer_web_pdf_Export
+          - --outdir
+          - ./rapports_conformite
+          - "./rapports_conformite/{{ nom_rapport }}"
+      delegate_to: localhost
+      become: false
+    - name: Rapatrier le rapport HTML sur la machine locale
+      ansible.builtin.fetch:
+        src: "/tmp/{{ nom_rapport }}"
+        dest: "./rapports_conformite/"
+        flat: yes
