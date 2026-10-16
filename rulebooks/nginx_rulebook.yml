@@ -2,14 +2,16 @@
 - name: Nginx remediation
   hosts: all
   sources:
-    - ansible.eda.alertmanager:
-        host: 0.0.0.0
-        port: 5000
+    - ansible.eda.url_check:
+        urls:
+          - http://192.168.99.131
+        delay: 10
   rules:
-    - name: Restart Nginx when it is down
-      condition: event.alert.labels.alertname == "NginxDown" and event.alert.status == "firing"
+    - name: Restart Nginx when the site is down
+      condition: event.url_check.status == "down"
+      throttle:
+        once_within: 2 minutes
       action:
-        run_playbook:
-          name: remediate_nginx.yml
-          extra_vars:
-            target_host: "{{ event.alert.labels.instance.split(':')[0] }}"
+        run_job_template:
+          name: Remediate Nginx
+          organization: Default
