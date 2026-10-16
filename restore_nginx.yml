@@ -1,0 +1,10 @@
+---
+- name: Remediation - Restore NGINX Web Server
+  hosts: webservers
+  become: true
+  tasks:
+    - name: Ensure NGINX is started and enabled
+      ansible.builtin.systemd:
+        name: nginx
+        state: started
+        enabled: true
