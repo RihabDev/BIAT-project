@@ -1,0 +1,54 @@
+---
+- name: Audit de conformité OpenSCAP CIS
+  hosts: all
+  become: yes
+
+  vars:
+    nom_rapport: "rapport-cis-{{ inventory_hostname }}-{{ ansible_date_time.date }}.html"
+
+    scap_distro: "{{ 'rhel' if ansible_distribution == 'RedHat' else ansible_distribution | lower }}{{ ansible_distribution_major_version }}"
+    scap_xml_path: "/usr/share/xml/scap/ssg/content/ssg-{{ scap_distro }}-ds.xml"
+
+    scap_profile: "xccdf_org.ssgproject.content_profile_cis_server_l1"
+
+  tasks:
+    - name: Installer les outils OpenSCAP et les guides de sécurité
+      ansible.builtin.package:
+        name:
+          - openscap-scanner
+          - scap-security-guide
+        state: present
+
+    - name: Exécuter l'analyse de conformité CIS et générer le rapport HTML
+      ansible.builtin.command:
+        argv:
+          - oscap
+          - xccdf
+          - eval
+          - --profile
+          - "{{ scap_profile }}"
+          - --report
+          - "/tmp/{{ nom_rapport }}"
+          - "{{ scap_xml_path }}"
+      register: resultat_audit
+      failed_when: resultat_audit.rc not in [0, 2]
+
+    - name: Rapatrier le rapport HTML sur la machine locale
+      ansible.builtin.fetch:
+        src: "/tmp/{{ nom_rapport }}"
+        dest: "./rapports_conformite/"
+        flat: yes
+
+    - name: Convertir le rapport en PDF
+      ansible.builtin.command:
+        argv:
+          - wkhtmltopdf
+          - "./rapports_conformite/{{ nom_rapport }}"
+          - "./rapports_conformite/{{ nom_rapport | replace('.html', '.pdf') }}"
+      delegate_to: localhost
+      become: false
+
+    - name: Nettoyer le rapport temporaire sur le serveur cible
+      ansible.builtin.file:
+        path: "/tmp/{{ nom_rapport }}"
+        state: absent
