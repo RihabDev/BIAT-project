@@ -8,15 +8,6 @@
     doc_root: "/usr/share/nginx/html/{{ app_name | lower }}"
 
   tasks:
-    - name: Nettoyer le cache DNF
-      ansible.builtin.command: dnf clean all
-      changed_when: false
-
-    - name: AppStream est activé 
-      ansible.builtin.command: subscription-manager repos --enable codeready-builder-for-rhel-9-x86_64-rpms --enable rhel-9-for-x86_64-appstream-rpms
-      ignore_errors: yes
-      changed_when: false
-
     - name: Installer le paquet Nginx
       ansible.builtin.dnf:
         name: nginx
