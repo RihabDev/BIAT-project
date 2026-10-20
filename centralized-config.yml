@@ -1,0 +1,68 @@
+- name: Gestion centralisée des configurations
+  hosts: all
+  become: true
+  vars:
+    ntp_servers:
+      - 0.pool.ntp.org
+      - 1.pool.ntp.org
+    dns_servers:
+      - 8.8.8.8
+      - 1.1.1.1
+    ssh_settings:
+      PermitRootLogin: "no"
+      PasswordAuthentication: "no"
+      X11Forwarding: "no"
+      MaxAuthTries: "3"
+    sysctl_settings:
+      net.ipv4.ip_forward: "0"
+      net.ipv4.conf.all.accept_redirects: "0"
+      net.ipv4.tcp_syncookies: "1"
+      kernel.randomize_va_space: "2"
+  tasks:
+    - name: Configurer SSH
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?{{ item.key }}\\b"
+        line: "{{ item.key }} {{ item.value }}"
+        validate: sshd -t -f %s
+      loop: "{{ ssh_settings | dict2items }}"
+      notify: Redémarrer sshd
+
+    - name: Configurer NTP avec chrony
+      ansible.builtin.copy:
+        dest: /etc/chrony.conf
+        content: |
+          {% for s in ntp_servers %}
+          server {{ s }} iburst
+          {% endfor %}
+          driftfile /var/lib/chrony/drift
+          makestep 1.0 3
+          rtcsync
+      notify: Redémarrer chronyd
+
+    - name: Configurer DNS
+      ansible.builtin.copy:
+        dest: /etc/resolv.conf
+        content: |
+          {% for d in dns_servers %}
+          nameserver {{ d }}
+          {% endfor %}
+
+    - name: Configurer sysctl
+      ansible.posix.sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: true
+      loop: "{{ sysctl_settings | dict2items }}"
+
+  handlers:
+    - name: Redémarrer sshd
+      ansible.builtin.service:
+        name: sshd
+        state: restarted
+
+    - name: Redémarrer chronyd
+      ansible.builtin.service:
+        name: chronyd
+        state: restarted
