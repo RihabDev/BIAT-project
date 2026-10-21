@@ -1,5 +1,5 @@
 - name: Set up file server
-  hosts: fileserver
+  hosts: all
   become: true
   tasks:
     - name: Install Apache
