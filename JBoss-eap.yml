@@ -1,19 +1,63 @@
-- name: Install JBoss EAP 7.4 from RPM
+- name: Install JBoss EAP 7.4 from archive
   hosts: all
   become: true
+  vars:
+    eap_user: jboss
+    eap_home: /opt/jboss-eap-7.4
+    eap_archive_url: http://your-server/jboss-eap-7.4.0.zip
   tasks:
-    - name: Enable JBoss EAP 7.4 repository
-      ansible.builtin.command: >
-        subscription-manager repos
-        --enable=jb-eap-7.4-for-rhel-{{ ansible_distribution_major_version }}-x86_64-rpms
-
-    - name: Install JBoss EAP with JDK 21
+    - name: Install required packages
       ansible.builtin.dnf:
-        name: "@jboss-eap7-jdk21"
+        name:
+          - java-17-openjdk-devel
+          - unzip
         state: present
 
+    - name: Create jboss group
+      ansible.builtin.group:
+        name: "{{ eap_user }}"
+        system: true
+
+    - name: Create jboss user
+      ansible.builtin.user:
+        name: "{{ eap_user }}"
+        group: "{{ eap_user }}"
+        system: true
+        shell: /sbin/nologin
+
+    - name: Download JBoss EAP archive
+      ansible.builtin.get_url:
+        url: "{{ eap_archive_url }}"
+        dest: /tmp/jboss-eap-7.4.0.zip
+
+    - name: Extract JBoss EAP archive
+      ansible.builtin.unarchive:
+        src: /tmp/jboss-eap-7.4.0.zip
+        dest: /opt
+        owner: "{{ eap_user }}"
+        group: "{{ eap_user }}"
+        remote_src: true
+        creates: "{{ eap_home }}"
+
+    - name: Create systemd service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/jboss-eap.service
+        content: |
+          [Unit]
+          Description=JBoss EAP 7.4
+          After=network.target
+
+          [Service]
+          User={{ eap_user }}
+          ExecStart={{ eap_home }}/bin/standalone.sh
+          Restart=on-failure
+
+          [Install]
+          WantedBy=multi-user.target
+
     - name: Enable and start JBoss EAP service
-      ansible.builtin.service:
-        name: eap7-standalone
+      ansible.builtin.systemd:
+        name: jboss-eap
         enabled: true
         state: started
+        daemon_reload: true
