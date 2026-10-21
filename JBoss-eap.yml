@@ -35,7 +35,6 @@
           client_id: rhsm-api
           refresh_token: "{{ offline_token }}"
       register: token
-      no_log: true
 
     - name: Get download link
       ansible.builtin.uri:
@@ -43,7 +42,6 @@
         headers:
           Authorization: "Bearer {{ token.json.access_token }}"
       register: image
-      no_log: true
 
     - name: Download JBoss EAP archive
       ansible.builtin.get_url:
