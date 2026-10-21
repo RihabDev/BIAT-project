@@ -4,7 +4,7 @@
   vars:
     eap_user: jboss
     eap_home: /opt/jboss-eap-7.4
-    eap_archive_url: http://192.168.99.131/jboss-eap-7.4.0.zip
+    eap_checksum: 5f1f0b7a389dedcd6f91ea3c8c6c9b723e9e8609bdf5720d4088e5469d46ad3a
   tasks:
     - name: Install required packages
       ansible.builtin.dnf:
@@ -25,9 +25,29 @@
         system: true
         shell: /sbin/nologin
 
+    - name: Get Red Hat access token
+      ansible.builtin.uri:
+        url: https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token
+        method: POST
+        body_format: form-urlencoded
+        body:
+          grant_type: refresh_token
+          client_id: rhsm-api
+          refresh_token: "{{ offline_token }}"
+      register: token
+      no_log: true
+
+    - name: Get download link
+      ansible.builtin.uri:
+        url: "https://api.access.redhat.com/management/v1/images/{{ eap_checksum }}/download"
+        headers:
+          Authorization: "Bearer {{ token.json.access_token }}"
+      register: image
+      no_log: true
+
     - name: Download JBoss EAP archive
       ansible.builtin.get_url:
-        url: "{{ eap_archive_url }}"
+        url: "{{ image.json.body.href }}"
         dest: /tmp/jboss-eap-7.4.0.zip
 
     - name: Extract JBoss EAP archive
