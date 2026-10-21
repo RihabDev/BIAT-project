@@ -1,72 +1,19 @@
-- name: Install JBoss EAP 7.4 from archive
+- name: Install JBoss EAP 7.4 from RPM
   hosts: all
   become: true
-  vars:
-    eap_user: jboss
-    eap_install_dir: /opt
-    eap_home: /opt/jboss-eap-7.4
-    eap_archive: /tmp/jboss-eap-7.4.0.zip
   tasks:
-    - name: Install required packages
+    - name: Enable JBoss EAP 7.4 repository
+      ansible.builtin.command: >
+        subscription-manager repos
+        --enable=jb-eap-7.4-for-rhel-{{ ansible_distribution_major_version }}-x86_64-rpms
+
+    - name: Install JBoss EAP with JDK 21
       ansible.builtin.dnf:
-        name:
-          - java-21-openjdk-devel
-          - unzip
-          - initscripts
+        name: "@jboss-eap7-jdk21"
         state: present
-
-    - name: Create jboss group
-      ansible.builtin.group:
-        name: "{{ eap_user }}"
-        system: true
-
-    - name: Create jboss user
-      ansible.builtin.user:
-        name: "{{ eap_user }}"
-        group: "{{ eap_user }}"
-        system: true
-        shell: /sbin/nologin
-
-    - name: Extract JBoss EAP archive
-      ansible.builtin.unarchive:
-        src: "{{ eap_archive }}"
-        dest: "{{ eap_install_dir }}"
-        owner: "{{ eap_user }}"
-        group: "{{ eap_user }}"
-        remote_src: true
-        creates: "{{ eap_home }}"
-
-    - name: Copy service configuration file
-      ansible.builtin.copy:
-        src: "{{ eap_home }}/bin/init.d/jboss-eap.conf"
-        dest: /etc/default/jboss-eap.conf
-        remote_src: true
-
-    - name: Set JBOSS_HOME
-      ansible.builtin.lineinfile:
-        path: /etc/default/jboss-eap.conf
-        regexp: '^#?\s*JBOSS_HOME='
-        line: 'JBOSS_HOME="{{ eap_home }}"'
-
-    - name: Set JBOSS_USER
-      ansible.builtin.lineinfile:
-        path: /etc/default/jboss-eap.conf
-        regexp: '^#?\s*JBOSS_USER='
-        line: 'JBOSS_USER={{ eap_user }}'
-
-    - name: Copy service startup script
-      ansible.builtin.copy:
-        src: "{{ eap_home }}/bin/init.d/jboss-eap-rhel.sh"
-        dest: /etc/init.d/jboss-eap-rhel.sh
-        mode: "0755"
-        remote_src: true
-
-    - name: Restore SELinux context
-      ansible.builtin.command: restorecon /etc/init.d/jboss-eap-rhel.sh
 
     - name: Enable and start JBoss EAP service
       ansible.builtin.service:
-        name: jboss-eap-rhel
+        name: eap7-standalone
         enabled: true
         state: started
-        daemon_reload: true
