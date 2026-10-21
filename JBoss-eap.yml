@@ -5,7 +5,7 @@
     eap_user: jboss
     eap_install_dir: /opt
     eap_home: /opt/jboss-eap-7.4
-    eap_archive: jboss-eap-7.4.0.zip
+    eap_archive: /tmp/jboss-eap-7.4.0.zip
   tasks:
     - name: Install required packages
       ansible.builtin.dnf:
@@ -33,6 +33,7 @@
         dest: "{{ eap_install_dir }}"
         owner: "{{ eap_user }}"
         group: "{{ eap_user }}"
+        remote_src: true
         creates: "{{ eap_home }}"
 
     - name: Copy service configuration file
