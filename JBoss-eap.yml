@@ -10,7 +10,7 @@
     - name: Install required packages
       ansible.builtin.dnf:
         name:
-          - java-11-openjdk-devel
+          - java-21-openjdk-devel
           - unzip
           - initscripts
         state: present
